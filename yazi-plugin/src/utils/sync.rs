@@ -37,7 +37,7 @@ impl Utils {
 						return Err("`ya.sync()` must be called in a plugin").into_lua_err();
 					};
 
-					Sendable::vec_to_variadic(lua, Self::retrieve(cur, block, args).await?)
+					Sendable::list_to_variadic(lua, Self::retrieve(cur, block, args).await?)
 				})
 			})?,
 		)?;

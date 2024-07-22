@@ -58,7 +58,7 @@ impl App {
 			if let Some(cb) = opt.cb {
 				cb(&LUA, plugin)
 			} else {
-				plugin.call_method("entry", Sendable::vec_to_table(&LUA, opt.args)?)
+				plugin.call_method("entry", Sendable::list_to_table(&LUA, opt.args)?)
 			}
 		});
 	}
