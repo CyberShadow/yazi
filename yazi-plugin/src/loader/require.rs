@@ -1,4 +1,6 @@
-use mlua::{ExternalResult, IntoLua, Lua, MetaMethod, Table, TableExt, UserData, Value, Variadic};
+use std::sync::Arc;
+
+use mlua::{ExternalResult, Function, IntoLua, Lua, MultiValue, Table, Value};
 
 use super::LOADER;
 use crate::RtRef;
@@ -6,41 +8,36 @@ use crate::RtRef;
 pub(super) struct Require;
 
 impl Require {
-	pub(super) fn install(lua: &'static Lua) -> mlua::Result<()> {
+	pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 		let globals = lua.globals();
 
 		globals.raw_set(
 			"require",
-			lua.create_function(|lua, name: mlua::String| {
-				let s = name.to_str()?;
+			lua.create_function(|lua, id: mlua::String| {
+				let s = id.to_str()?;
 				futures::executor::block_on(LOADER.ensure(s)).into_lua_err()?;
 
-				lua.named_registry_value::<RtRef>("rt")?.swap(s);
-				let mod_ = LOADER.load(s)?;
-				lua.named_registry_value::<RtRef>("rt")?.reset();
+				lua.named_registry_value::<RtRef>("rt")?.push(s);
+				let mod_ = LOADER.load(lua, s);
+				lua.named_registry_value::<RtRef>("rt")?.pop();
 
-				Self::create_mt(lua, name, mod_)
+				Self::create_mt(lua, s, mod_?)
 			})?,
 		)?;
 
 		Ok(())
 	}
 
-	fn create_mt(
-		lua: &'static Lua,
-		name: mlua::String<'static>,
-		mod_: Table<'static>,
-	) -> mlua::Result<Table<'static>> {
-		let ts =
-			lua.create_table_from([("name", name.into_lua(lua)?), ("mod", mod_.into_lua(lua)?)])?;
+	fn create_mt<'a>(lua: &'a Lua, id: &str, mod_: Table<'a>) -> mlua::Result<Table<'a>> {
+		let ts = lua.create_table_from([("_mod", mod_.into_lua(lua)?)])?;
 
+		let id: Arc<str> = Arc::from(id);
 		let mt = lua.create_table_from([(
 			"__index",
-			lua.create_function(|_, (_, key): (Table, mlua::String)| {
-				if key.to_str()? == "setup" {
-					Ok(RequireSetup)
-				} else {
-					Err("Only `require():setup()` is supported").into_lua_err()
+			lua.create_function(move |lua, (ts, key): (Table, mlua::String)| {
+				match ts.raw_get::<_, Table>("_mod")?.raw_get::<_, Value>(&key)? {
+					Value::Function(_) => Self::create_wrapper(lua, id.clone(), key.to_str()?)?.into_lua(lua),
+					v => Ok(v),
 				}
 			})?,
 		)])?;
@@ -48,18 +45,19 @@ impl Require {
 		ts.set_metatable(Some(mt));
 		Ok(ts)
 	}
-}
 
-pub(super) struct RequireSetup;
+	fn create_wrapper<'a>(lua: &'a Lua, id: Arc<str>, f: &str) -> mlua::Result<Function<'a>> {
+		let f: Arc<str> = Arc::from(f);
 
-impl UserData for RequireSetup {
-	fn add_methods<'lua, M: mlua::UserDataMethods<'lua, Self>>(methods: &mut M) {
-		methods.add_meta_method(MetaMethod::Call, |lua, _, (ts, args): (Table, Variadic<Value>)| {
-			let (name, mod_): (mlua::String, Table) = (ts.raw_get("name")?, ts.raw_get("mod")?);
-			lua.named_registry_value::<RtRef>("rt")?.swap(name.to_str()?);
-			let result = mod_.call_method::<_, Variadic<Value>>("setup", args);
-			lua.named_registry_value::<RtRef>("rt")?.reset();
+		lua.create_function(move |lua, (ts, args): (Table, MultiValue)| {
+			let f: Function = ts.raw_get::<_, Table>("_mod")?.raw_get(&*f)?;
+			let args = MultiValue::from_iter([ts.into_lua(lua)?].into_iter().chain(args));
+
+			lua.named_registry_value::<RtRef>("rt")?.push(&id);
+			let result = f.call::<_, MultiValue>(args);
+			lua.named_registry_value::<RtRef>("rt")?.pop();
+
 			result
-		});
+		})
 	}
 }

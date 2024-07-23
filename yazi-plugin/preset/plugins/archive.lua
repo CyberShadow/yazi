@@ -1,15 +1,11 @@
-local M = {}
+local M = {
+	PAT_MATCH = "^[-%d]+%s+[:%d]+%s+([.%a]+)%s+(%d+)%s+%d+%s+(.+)[\r\n]+",
+}
 
 function M:peek()
-	local child
-	if ya.target_os() == "macos" then
-		child = self:try_spawn("7zz") or self:try_spawn("7z")
-	else
-		child = self:try_spawn("7z") or self:try_spawn("7zz")
-	end
-
+	local child = self:spawn_7z { "l", "-ba", tostring(self.file.url) }
 	if not child then
-		return ya.err("spawn `7z` and `7zz` both commands failed, error code: " .. tostring(self.last_error))
+		return
 	end
 
 	local limit = self.area.h
@@ -20,7 +16,7 @@ function M:peek()
 			break
 		end
 
-		local attr, size, name = next:match("^[-%d]+%s+[:%d]+%s+([.%a]+)%s+(%d+)%s+%d+%s+(.+)[\r\n]+")
+		local attr, size, name = next:match(self.PAT_MATCH)
 		if not name then
 			goto continue
 		end
@@ -73,12 +69,29 @@ function M:seek(units)
 	end
 end
 
-function M:try_spawn(name)
-	local child, code = Command(name):args({ "l", "-ba", tostring(self.file.url) }):stdout(Command.PIPED):spawn()
-	if not child then
-		self.last_error = code
+function M:spawn_7z(args)
+	local last_error = nil
+	local try = function(name)
+		local stdout = args[1] == "l" and Command.PIPED or Command.NULL
+		local stderr = args[1] == "x" and Command.PIPED or Command.NULL
+		local child, code = Command(name):args(args):stdout(stdout):stderr(stderr):spawn()
+		if not child then
+			last_error = code
+		end
+		return child
 	end
-	return child
+
+	local child
+	if ya.target_os() == "macos" then
+		child = try("7zz") or try("7z")
+	else
+		child = try("7z") or try("7zz")
+	end
+
+	if not child then
+		return ya.err("spawn `7z` and `7zz` both commands failed, error code: " .. tostring(last_error))
+	end
+	return child, last_error
 end
 
 return M

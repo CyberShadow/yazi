@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use mlua::{ExternalError, Lua, Table, Value, Variadic};
+use mlua::{ExternalError, Lua, MultiValue, Table, Value};
 use yazi_shared::{event::{Data, DataKey}, OrderedFloat};
 
 pub struct Sendable;
@@ -82,15 +82,15 @@ impl Sendable {
 		lua.create_sequence_from(vec)
 	}
 
-	pub fn list_to_variadic(lua: &Lua, data: Vec<Data>) -> mlua::Result<Variadic<Value>> {
+	pub fn list_to_values(lua: &Lua, data: Vec<Data>) -> mlua::Result<MultiValue> {
 		let mut vec = Vec::with_capacity(data.len());
 		for v in data {
 			vec.push(Self::data_to_value(lua, v)?);
 		}
-		Ok(Variadic::from_iter(vec))
+		Ok(MultiValue::from_iter(vec))
 	}
 
-	pub fn variadic_to_vec(values: Variadic<Value>) -> mlua::Result<Vec<Data>> {
+	pub fn values_to_vec(values: MultiValue) -> mlua::Result<Vec<Data>> {
 		let mut vec = Vec::with_capacity(values.len());
 		for value in values {
 			vec.push(Self::value_to_data(value)?);
